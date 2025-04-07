@@ -1,5 +1,6 @@
 public static void main(String args[]){
 log.info("main class");
-log.infor("my second commit");
-log.infor("my third commit");
+log.info("my second commit");
+log.info("my third commit");
+log.info("my fourth commit");
 }
