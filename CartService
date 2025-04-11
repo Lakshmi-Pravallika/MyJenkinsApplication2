@@ -2,6 +2,7 @@ class Cart{
 public static boolean isValidStateCode(String stateCode) {
 		log.info("Checking for Valid state codes...");
 		return STATE_CODES.containsKey(StringUtils.upperCase(stateCode));
+log.info("Cart Service");
 	}
 
 	public static Integer getYear(long timestamp) {
