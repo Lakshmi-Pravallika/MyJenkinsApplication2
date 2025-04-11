@@ -7,4 +7,5 @@ log.info("my fifth commit");
 log.info("my sixth commit");
 log.info("my seventh commit");
 log.info("my eighth commit");
+log.info("my feature_branch_02 commit");
 }
