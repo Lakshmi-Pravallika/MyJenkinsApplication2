@@ -1,0 +1,13 @@
+class Cart{
+public static boolean isValidStateCode(String stateCode) {
+		log.info("Checking for Valid state codes...");
+		return STATE_CODES.containsKey(StringUtils.upperCase(stateCode));
+	}
+
+	public static Integer getYear(long timestamp) {
+		Instant instant = Instant.ofEpochMilli(timestamp);
+		LocalDateTime date = instant.atZone(ZoneId.systemDefault()).toLocalDateTime();
+		return date.getYear();
+	}
+
+}
