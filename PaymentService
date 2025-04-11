@@ -1,0 +1,13 @@
+class Payment {
+
+public String getPaypalClientToken() {
+		JsonObject jsonObject = new JsonObject();
+		jsonObject.addProperty("client_token", braintreeGateway.clientToken().generate());
+		return jsonObject.toString();
+	}
+
+private static String encodeCredentials(String clientId, String clientSecret) {
+		String credentials = clientId + ":" + clientSecret;
+		return java.util.Base64.getEncoder().encodeToString(credentials.getBytes());
+	}
+}
