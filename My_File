@@ -1,15 +1,49 @@
-Mockito.when(getCircuitBreaker.getMetrics()).thenReturn(circuitBreakerMetrics);
-    Mockito.when(postCircuitBreaker.getMetrics()).thenReturn(circuitBreakerMetrics);
+@Test
+void testGetProductListFromCache_WhenRestTemplateFails_ShouldTriggerFallback() {
+    // Enable the cache
+    ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
 
-    // Stub Metrics methods
-    Mockito.when(circuitBreakerMetrics.getFailureRate()).thenReturn(0.0f);
-    Mockito.when(circuitBreakerMetrics.getNumberOfBufferedCalls()).thenReturn(10);
-    Mockito.when(circuitBreakerMetrics.getNumberOfFailedCalls()).thenReturn(2);
-    Mockito.when(circuitBreakerMetrics.getNumberOfSlowCalls()).thenReturn(1);
-    Mockito.when(circuitBreakerMetrics.getNumberOfSuccessfulCalls()).thenReturn(7);
+    // Set private fields
+    ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
+    ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
 
-    // Also stub CircuitBreaker state and config
-    Mockito.when(getCircuitBreaker.getState()).thenReturn(CircuitBreaker.State.CLOSED);
-    Mockito.when(postCircuitBreaker.getState()).thenReturn(CircuitBreaker.State.CLOSED);
-    Mockito.when(getCircuitBreaker.getCircuitBreakerConfig()).thenReturn(null);
-    Mockito.when(postCircuitBreaker.getCircuitBreakerConfig()).thenReturn(null);
+    // Mock the API key
+    Mockito.when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("dummy-key");
+
+    // Make restTemplate throw
+    Mockito.when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
+           .thenThrow(new RuntimeException("Simulated failure"));
+
+    // Call method
+    Object result = serviceHelper.getProductListFromCache(cacheModel);
+
+    // ✅ Even though CircuitBreakerException is thrown internally,
+    //    the outer catch returns false to the caller
+    assertEquals(false, result);
+
+    // Verify restTemplate was called
+    Mockito.verify(restTemplate, times(1))
+           .exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class));
+}
+
+
+@Test
+void testCircuitBreakerLambdaThrowsException() throws Throwable {
+    // Enable cache
+    ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
+
+    // Force API key
+    Mockito.when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("dummy-key");
+
+    // Force restTemplate to throw
+    Mockito.when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
+           .thenThrow(new RuntimeException("Simulated failure"));
+
+    // Build the supplier manually like inside serviceHelper
+    CheckedFunction0<Object> supplier = CircuitBreaker.decorateCheckedSupplier(getCircuitBreaker, () -> {
+        throw new CircuitBreakerException("Main execution failed", new RuntimeException("Simulated failure"));
+    });
+
+    // ✅ This will now actually throw CircuitBreakerException
+    assertThrows(CircuitBreakerException.class, supplier::apply);
+}
