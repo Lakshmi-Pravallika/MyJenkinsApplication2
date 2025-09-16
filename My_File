@@ -1,59 +1,129 @@
- @Test
-    void populateAutoSuggestedProducts_should_map_skuData_when_present() {
-        // Arrange: suggestion group with one search suggestion with pid "SKU123"
-        SuggestionGroup suggestionGroup = new SuggestionGroup();
-        SearchSuggestion s = new SearchSuggestion();
-        s.setPid("SKU123");
-        s.setGender("Men");
-        s.setTitle("Trail Runner");
-        suggestionGroup.setSearchSuggestions(List.of(s));
+package com.skechers.loyalty.reflecktions.service;
 
-        AutoSuggestMSResponse msResponse = new AutoSuggestMSResponse();
-        msResponse.setSuggestion(new QuerySuggestion());
+import com.amazonaws.services.simplesystemsmanagement.AWSSimpleSystemsManagement;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.skechers.loyalty.reflecktions.exception.CircuitBreakerException;
+import com.skechers.loyalty.reflecktions.model.ProductListCacheModel;
+import com.skechers.loyalty.reflecktions.utils.ParameterUtil;
+import com.skechers.loyalty.reflecktions.utils.ReflecktionsUtils;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.*;
+import org.springframework.web.client.RestTemplate;
 
-        // Build skuData with all fields that the service maps when skuData != null
-        ProductSkuResultData.ProductSkuData skuData = new ProductSkuResultData.ProductSkuData();
-        skuData.setC_sPrice("99.95");
-        skuData.setC_bPrice("129.95");
-        skuData.setC_image("http://images.example/sku123.jpg");
-        skuData.setC_selectedVariationGroupId("varGroup-1");
-        ProductSkuResultData.ProductSkuData.Master master = new ProductSkuResultData.ProductSkuData.Master();
-        master.setMasterId("MASTER-123");
-        skuData.setMaster(master);
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
-        Map<String, ProductSkuResultData.ProductSkuData> skuMap = new HashMap<>();
-        // Key must exactly match the pid used in the SearchSuggestion
-        skuMap.put("SKU123", skuData);
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-        // Static-mock ReflecktionsUtils.getSkuMap(...) to return our skuMap
-        try (MockedStatic<ReflecktionsUtils> mocked = Mockito.mockStatic(ReflecktionsUtils.class)) {
-            // Use matchers that will match the actual call in the service:
-            // - first arg: any list containing "SKU123" (we'll accept anyList to be robust)
-            // - second arg: shopApiUrl field from the service (we set it above)
-            // - the rest: any mocks
-            mocked.when(() -> ReflecktionsUtils.getSkuMap(anyList(), eq(bloomreachService.shopApiUrl),
-                    eq(restTemplate), eq(parameterUtil), eq(mapper)))
-                    .thenReturn(skuMap);
+@ExtendWith(MockitoExtension.class)
+class LoyaltyReflecktionsServiceHelperTest {
 
-            // Act
-            bloomreachService.populateAutoSuggestedProducts(suggestionGroup, msResponse);
+    @Mock
+    CircuitBreaker getCircuitBreaker;
 
-            // Assert: msResponse.suggestion.suggestedProducts was populated from skuData
-            assertNotNull(msResponse.getSuggestion().getSuggestedProducts(), "suggestedProducts should not be null");
-            assertEquals(1, msResponse.getSuggestion().getSuggestedProducts().size());
+    @Mock
+    CircuitBreaker postCircuitBreaker;
 
-            SuggestedProduct product = msResponse.getSuggestion().getSuggestedProducts().get(0);
+    @Mock
+    AWSSimpleSystemsManagement ssmClient;
 
-            // Verify all mapped fields (these are the fields set in the service when skuData != null)
-            assertEquals("Men Trail Runner", product.getName(), "name should be gender + title");
-            assertEquals("99.95", product.getPrice());
-            assertEquals("129.95", product.getList_price());
-            assertEquals("http://images.example/sku123.jpg", product.getImage_url());
-            assertEquals("varGroup-1", product.getC_selectedVariationGroupId());
-            assertEquals("MASTER-123", product.getC_masterId());
+    @Mock
+    ParameterUtil parameterUtil;
 
-            // Optional: verify the static method was called once
-            mocked.verify(() -> ReflecktionsUtils.getSkuMap(anyList(), eq(bloomreachService.shopApiUrl),
-                    eq(restTemplate), eq(parameterUtil), eq(mapper)), times(1));
+    @Mock
+    RestTemplate restTemplate;
+
+    @InjectMocks
+    LoyaltyReflecktionsServiceHelper serviceHelper;
+
+    ProductListCacheModel cacheModel;
+
+    @BeforeEach
+    void setUp() {
+        serviceHelper.cacheHost = "http://mock-cache-host";
+        serviceHelper.environment = "dev";
+
+        cacheModel = new ProductListCacheModel();
+        cacheModel.setCategory("shoes");
+        cacheModel.setLocale(Optional.of("en-US"));
+        cacheModel.setPage(Optional.of("1"));
+        cacheModel.setLimit(Optional.of("20"));
+        cacheModel.setSort(Optional.of("price"));
+        cacheModel.setFilter(Optional.of("color=red"));
+        cacheModel.setSearchType(Optional.of("type1"));
+        cacheModel.setStore_id(Optional.of("store123"));
+    }
+
+    /**
+     * Covers the GET path where restTemplate.exchange throws Exception
+     * -> triggers CircuitBreakerException
+     */
+    @Test
+    void testGetProductListFromCache_ThrowsCircuitBreakerException() {
+        serviceHelper.isCacheEnabled = true;
+
+        // Mock restTemplate to throw an exception inside the supplier
+        when(restTemplate.exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
+                .thenThrow(new RuntimeException("Simulated GET failure"));
+
+        // Mock parameterUtil
+        when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("mock-api-key");
+
+        CircuitBreaker mockCb = mock(CircuitBreaker.class);
+        when(getCircuitBreaker.decorateCheckedSupplier(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThrows(CircuitBreakerException.class, () -> {
+            serviceHelper.getProductListFromCache(cacheModel);
+        });
+
+        verify(restTemplate, times(1)).exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class));
+    }
+
+    /**
+     * Covers the POST path where restTemplate.exchange throws Exception
+     * -> triggers CircuitBreakerException
+     */
+    @Test
+    void testPostProductListToCache_ThrowsCircuitBreakerException() throws JsonProcessingException {
+        serviceHelper.isCacheEnabled = true;
+
+        // Mock restTemplate to throw an exception inside the supplier
+        when(restTemplate.exchange(any(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Boolean.class)))
+                .thenThrow(new RuntimeException("Simulated POST failure"));
+
+        // Mock parameterUtil
+        when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("mock-api-key");
+
+        CircuitBreaker mockCb = mock(CircuitBreaker.class);
+        when(postCircuitBreaker.decorateCheckedSupplier(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CompletableFuture<Boolean> future = serviceHelper.postProductListToCache(cacheModel, "mock-payload");
+
+        // Since exception is thrown, fallback should result in false
+        Boolean result = future.join();
+        assertFalse(result);
+
+        verify(restTemplate, times(1)).exchange(any(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Boolean.class));
+    }
+
+    /**
+     * Covers resetCacheFlag using static mocking of ReflecktionsUtils
+     */
+    @Test
+    void testResetCacheFlag() {
+        try (MockedStatic<ReflecktionsUtils> mockedStatic = Mockito.mockStatic(ReflecktionsUtils.class)) {
+            mockedStatic.when(() -> ReflecktionsUtils.getParameterValue(eq(ssmClient),
+                    eq("/config/loyalty_dev/is_cache_enabled"))).thenReturn("true");
+
+            serviceHelper.resetCacheFlag();
+
+            // Since value is "true", isCacheEnabled should become true
+            assertTrue(serviceHelper.isCacheEnabled);
         }
     }
+}
