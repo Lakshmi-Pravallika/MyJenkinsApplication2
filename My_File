@@ -1,120 +1,48 @@
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.skechers.loyalty.reflecktions.data.response.*;
-import com.skechers.loyalty.reflecktions.model.ProductListCacheModel;
-import com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-
-import java.io.IOException;
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
-class LoyaltyReflecktionsServiceImplTest {
-
-    @Mock
-    private ObjectMapper mapper;
-
-    @InjectMocks
-    private LoyaltyReflecktionsServiceImpl service;
-
-    private ProductListCacheModel cacheModel;
-    private Map<String, String> filterMap;
-    private SearchCategoryResponseData responseData;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-
-        cacheModel = ProductListCacheModel.builder().build();
-        filterMap = new HashMap<>();
-
-        // ----------- Build SearchCategoryResponseData -------------
-        responseData = new SearchCategoryResponseData();
-        responseData.setTotalItem(2);
-
-        // Mock product values
-        ValueItem item1 = new ValueItem();
-        item1.setId("p1");
-
-        ValueItem item2 = new ValueItem();
-        item2.setId("p2");
-
-        ProductData productData = new ProductData();
-        productData.setValue(Arrays.asList(item1, item2));
-
-        ContentData contentData = new ContentData();
-        contentData.setProduct(productData);
-        responseData.setContent(contentData);
-
-        // ----------- Build Facets -------------
-        CategoryProductFacetValue facetValue = new CategoryProductFacetValue();
-        facetValue.setLabel("Red");
-        facetValue.setValue("red");
-
-        CategoryProductFacetData colorFacet = new CategoryProductFacetData();
-        colorFacet.setValue(new ArrayList<>(Collections.singletonList(facetValue)));
-
-        CategoryProductFacetData sizeFacet = new CategoryProductFacetData();
-        sizeFacet.setValue(new ArrayList<>());
-
-        Map<String, CategoryProductFacetData> facetMap = new HashMap<>();
-        facetMap.put("colors", colorFacet);
-        facetMap.put("sizes", sizeFacet);
-
-        responseData.setFacet(facetMap);
-    }
-
-    @Test
-    void testProcessSearchForRefk_Success() throws IOException {
+ @Test
+    void testPopulateAutoSuggestedProducts_skuDataNotNull() {
         // Arrange
-        String expectedJson = "{\"status\":\"success\"}";
-        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
+        SuggestionGroup suggestionGroup = new SuggestionGroup();
+        SearchSuggestion suggestion = new SearchSuggestion();
+        suggestion.setPid("12345");
+        suggestion.setGender("Men");
+        suggestion.setTitle("Running Shoes");
+        suggestionGroup.setSearchSuggestions(List.of(suggestion));
 
-        // Act
-        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
+        AutoSuggestMSResponse msResponse = new AutoSuggestMSResponse();
+        msResponse.setSuggestion(new QuerySuggestion());
 
-        // Assert
-        assertNotNull(result);
-        assertEquals(expectedJson, result);
+        // Mock SKU data
+        ProductSkuResultData.ProductSkuData skuData = new ProductSkuResultData.ProductSkuData();
+        skuData.setC_sPrice("99.99");
+        skuData.setC_bPrice("129.99");
+        skuData.setC_image("http://image-url.com/img.jpg");
+        skuData.setC_selectedVariationGroupId("varGroup123");
 
-        // Verify JSON serialization was called
-        verify(mapper, times(1)).writeValueAsString(any(SearchCategoryResponseData.class));
+        ProductSkuResultData.ProductSkuData.Master master = new ProductSkuResultData.ProductSkuData.Master();
+        master.setMasterId("master123");
+        skuData.setMaster(master);
 
-        // Verify facets are processed
-        assertTrue(responseData.getFacet().containsKey("colors"));
-        assertTrue(responseData.getFacet().containsKey("sizes"));
+        Map<String, ProductSkuResultData.ProductSkuData> skuMap = new HashMap<>();
+        skuMap.put("12345", skuData);
+
+        try (MockedStatic<ReflecktionsUtils> mockedUtils = Mockito.mockStatic(ReflecktionsUtils.class)) {
+            mockedUtils.when(() -> ReflecktionsUtils.getSkuMap(anyList(), anyString(), any(), any(), any()))
+                    .thenReturn(skuMap);
+
+            // Act
+            bloomreachService.populateAutoSuggestedProducts(suggestionGroup, msResponse);
+
+            // Assert
+            List<SuggestedProduct> products = msResponse.getSuggestion().getSuggestedProducts();
+            assertNotNull(products);
+            assertEquals(1, products.size());
+
+            SuggestedProduct product = products.get(0);
+            assertEquals("Men Running Shoes", product.getName());
+            assertEquals("99.99", product.getPrice());
+            assertEquals("129.99", product.getList_price());
+            assertEquals("http://image-url.com/img.jpg", product.getImage_url());
+            assertEquals("varGroup123", product.getC_selectedVariationGroupId());
+            assertEquals("master123", product.getC_masterId());
+        }
     }
-
-    @Test
-    void testProcessSearchForRefk_WhenTotalItemZero() throws IOException {
-        // Arrange
-        responseData.setTotalItem(0);
-        String expectedJson = "{\"status\":\"empty\"}";
-        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
-
-        // Act
-        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
-
-        // Assert
-        assertEquals(0, responseData.getTotalPage(), "Total page should be 0 when no items are present");
-        assertEquals(expectedJson, result);
-    }
-
-    @Test
-    void testProcessSearchForRefk_WhenIOExceptionOccurs() throws IOException {
-        // Arrange
-        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class)))
-                .thenThrow(new IOException("Serialization failed"));
-
-        // Act
-        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
-
-        // Assert
-        assertNull(result, "Result should be null when serialization fails");
-    }
-}
