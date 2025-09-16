@@ -1,6 +1,6 @@
 @Test
-void testGetProductListFromCache_WhenRuntimeException_ShouldThrowCircuitBreakerException() throws JsonProcessingException {
-    // Arrange - enable caching
+void testGetProductListFromCache_WhenRestTemplateFails_ShouldThrowCircuitBreakerException() {
+    // Ensure prerequisites are met
     ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
     ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
     ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
@@ -8,21 +8,27 @@ void testGetProductListFromCache_WhenRuntimeException_ShouldThrowCircuitBreakerE
     // Mock circuit breaker to directly execute supplier
     Mockito.when(getCircuitBreaker.executeSupplier(Mockito.any()))
            .thenAnswer(invocation -> {
-               return ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+               @SuppressWarnings("unchecked")
+               java.util.function.Supplier<Object> supplier =
+                   (java.util.function.Supplier<Object>) invocation.getArgument(0);
+               return supplier.get(); // Let the failure bubble up
            });
 
-    // Mock restTemplate to throw runtime exception
+    // Mock restTemplate to throw a runtime exception
     Mockito.when(restTemplate.getForObject(Mockito.anyString(), Mockito.eq(String.class)))
            .thenThrow(new RuntimeException("Simulated REST failure"));
 
     // Act & Assert
-    CircuitBreakerException thrown = assertThrows(
+    CircuitBreakerException exception = assertThrows(
             CircuitBreakerException.class,
             () -> serviceHelper.getProductListFromCache(productListCacheModel),
-            "Expected CircuitBreakerException to be thrown when RestTemplate fails"
+            "Expected CircuitBreakerException to be thrown when restTemplate fails"
     );
 
-    // Validate exception message and cause
-    assertEquals("Main execution failed", thrown.getMessage());
-    assertEquals("Simulated REST failure", thrown.getCause().getMessage());
+    // Verify exception details
+    assertEquals("Main execution failed", exception.getMessage());
+    assertEquals("Simulated REST failure", exception.getCause().getMessage());
+
+    // Verify restTemplate was actually called
+    Mockito.verify(restTemplate).getForObject(Mockito.anyString(), Mockito.eq(String.class));
 }
