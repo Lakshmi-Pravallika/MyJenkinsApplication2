@@ -17,12 +17,12 @@ import static org.mockito.Mockito.*;
 class LoyaltyReflecktionsServiceImplTest {
 
     @Mock
-    private ObjectMapper objectMapper;
+    private ObjectMapper mapper;
 
     @InjectMocks
     private LoyaltyReflecktionsServiceImpl service;
 
-    private ProductListCacheModel productListCacheModel;
+    private ProductListCacheModel cacheModel;
     private Map<String, String> filterMap;
     private SearchCategoryResponseData responseData;
 
@@ -30,37 +30,41 @@ class LoyaltyReflecktionsServiceImplTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
 
-        productListCacheModel = ProductListCacheModel.builder().build();
+        cacheModel = ProductListCacheModel.builder().build();
         filterMap = new HashMap<>();
 
-        // Setup mock SearchCategoryResponseData
+        // ----------- Build SearchCategoryResponseData -------------
         responseData = new SearchCategoryResponseData();
         responseData.setTotalItem(2);
 
-        // Mock Product
+        // Mock product values
+        ValueItem item1 = new ValueItem();
+        item1.setId("p1");
+
+        ValueItem item2 = new ValueItem();
+        item2.setId("p2");
+
         ProductData productData = new ProductData();
-        ValueItem valueItem1 = new ValueItem();
-        valueItem1.setId("prod1");
-
-        ValueItem valueItem2 = new ValueItem();
-        valueItem2.setId("prod2");
-
-        productData.setValue(Arrays.asList(valueItem1, valueItem2));
+        productData.setValue(Arrays.asList(item1, item2));
 
         ContentData contentData = new ContentData();
         contentData.setProduct(productData);
         responseData.setContent(contentData);
 
-        // Mock Facet
-        CategoryProductFacetData facetData = new CategoryProductFacetData();
+        // ----------- Build Facets -------------
         CategoryProductFacetValue facetValue = new CategoryProductFacetValue();
         facetValue.setLabel("Red");
         facetValue.setValue("red");
-        facetData.setValue(Collections.singletonList(facetValue));
+
+        CategoryProductFacetData colorFacet = new CategoryProductFacetData();
+        colorFacet.setValue(new ArrayList<>(Collections.singletonList(facetValue)));
+
+        CategoryProductFacetData sizeFacet = new CategoryProductFacetData();
+        sizeFacet.setValue(new ArrayList<>());
 
         Map<String, CategoryProductFacetData> facetMap = new HashMap<>();
-        facetMap.put("colors", facetData);
-        facetMap.put("sizes", new CategoryProductFacetData());
+        facetMap.put("colors", colorFacet);
+        facetMap.put("sizes", sizeFacet);
 
         responseData.setFacet(facetMap);
     }
@@ -68,47 +72,49 @@ class LoyaltyReflecktionsServiceImplTest {
     @Test
     void testProcessSearchForRefk_Success() throws IOException {
         // Arrange
-        String expectedJson = "{\"result\":\"success\"}";
-        when(objectMapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
+        String expectedJson = "{\"status\":\"success\"}";
+        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
 
         // Act
-        String actualResponse = service.processSearchForRefk(filterMap, productListCacheModel, responseData, null);
+        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
 
         // Assert
-        assertNotNull(actualResponse, "Response should not be null");
-        assertEquals(expectedJson, actualResponse, "The JSON response should match the expected output");
+        assertNotNull(result);
+        assertEquals(expectedJson, result);
 
-        // Verify that ObjectMapper was called once
-        verify(objectMapper, times(1)).writeValueAsString(any(SearchCategoryResponseData.class));
+        // Verify JSON serialization was called
+        verify(mapper, times(1)).writeValueAsString(any(SearchCategoryResponseData.class));
+
+        // Verify facets are processed
+        assertTrue(responseData.getFacet().containsKey("colors"));
+        assertTrue(responseData.getFacet().containsKey("sizes"));
     }
 
     @Test
-    void testProcessSearchForRefk_EmptyResults() throws IOException {
+    void testProcessSearchForRefk_WhenTotalItemZero() throws IOException {
         // Arrange
         responseData.setTotalItem(0);
-        String expectedJson = "{\"result\":\"empty\"}";
-        when(objectMapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
+        String expectedJson = "{\"status\":\"empty\"}";
+        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
 
         // Act
-        String actualResponse = service.processSearchForRefk(filterMap, productListCacheModel, responseData, null);
+        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
 
         // Assert
-        assertNotNull(actualResponse);
-        assertEquals(expectedJson, actualResponse);
-        assertEquals(0, responseData.getTotalPage(), "Total page should be set to 0 when no items are present");
-
-        verify(objectMapper, times(1)).writeValueAsString(any(SearchCategoryResponseData.class));
+        assertEquals(0, responseData.getTotalPage(), "Total page should be 0 when no items are present");
+        assertEquals(expectedJson, result);
     }
 
     @Test
-    void testProcessSearchForRefk_ThrowsIOException() throws IOException {
+    void testProcessSearchForRefk_WhenIOExceptionOccurs() throws IOException {
         // Arrange
-        when(objectMapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenThrow(new IOException("JSON error"));
+        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class)))
+                .thenThrow(new IOException("Serialization failed"));
 
         // Act
-        String actualResponse = service.processSearchForRefk(filterMap, productListCacheModel, responseData, null);
+        String result = service.processSearchForRefk(filterMap, cacheModel, responseData, null);
 
         // Assert
-        assertNull(actualResponse, "Response should be null when an exception occurs");
+        assertNull(result, "Result should be null when serialization fails");
     }
 }
