@@ -1,36 +1,47 @@
 @Test
-void testGetProductListFromCache_WhenRestTemplateFails_ShouldThrowCircuitBreakerException() {
-    // Precondition: required fields set
+void testPostProductListToCache_WhenRestTemplateFails_ShouldReturnFalse() throws Exception {
+    // Arrange
     ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
     ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
 
-    // 1. Mock Circuit Breaker to directly run supplier
-    Mockito.when(getCircuitBreaker.executeSupplier(Mockito.any()))
-           .thenAnswer(invocation -> {
-               System.out.println("executeSupplier invoked!");
-               @SuppressWarnings("unchecked")
-               java.util.function.Supplier<Object> supplier =
-                       (java.util.function.Supplier<Object>) invocation.getArgument(0);
-               return supplier.get(); // run directly so any exception propagates
-           });
+    // Mock metrics for logging
+    Mockito.when(postCircuitBreaker.getMetrics()).thenReturn(circuitBreakerMetrics);
+    Mockito.when(circuitBreakerMetrics.getFailureRate()).thenReturn(0.0f);
+    Mockito.when(circuitBreakerMetrics.getNumberOfBufferedCalls()).thenReturn(10);
+    Mockito.when(circuitBreakerMetrics.getNumberOfFailedCalls()).thenReturn(2);
+    Mockito.when(circuitBreakerMetrics.getNumberOfSlowCalls()).thenReturn(1);
+    Mockito.when(circuitBreakerMetrics.getNumberOfSuccessfulCalls()).thenReturn(7);
 
-    // 2. Make restTemplate throw an exception
-    Mockito.when(restTemplate.getForObject(Mockito.anyString(), Mockito.eq(String.class)))
-           .thenThrow(new RuntimeException("Simulated REST failure"));
+    // Mock parameterUtil to return a fake API key
+    Mockito.when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("dummy-api-key");
 
-    // 3. Run and assert
-    CircuitBreakerException exception = assertThrows(
-            CircuitBreakerException.class,
-            () -> {
-                System.out.println("Calling serviceHelper.getProductListFromCache now...");
-                serviceHelper.getProductListFromCache(productListCacheModel);
-            }
-    );
+    // Mock circuit breaker to directly execute the supplier
+    Mockito.lenient().when(postCircuitBreaker.executeSupplier(Mockito.any()))
+            .thenAnswer(invocation -> {
+                @SuppressWarnings("unchecked")
+                java.util.function.Supplier<Object> supplier =
+                        (java.util.function.Supplier<Object>) invocation.getArgument(0);
+                return supplier.get();
+            });
 
-    // 4. Validate
-    assertEquals("Main execution failed", exception.getMessage());
-    assertEquals("Simulated REST failure", exception.getCause().getMessage());
+    // Mock restTemplate.exchange to throw RuntimeException to trigger catch block
+    Mockito.lenient().when(restTemplate.exchange(
+            Mockito.any(URI.class),
+            Mockito.eq(HttpMethod.POST),
+            Mockito.any(HttpEntity.class),
+            Mockito.eq(Boolean.class)
+    )).thenThrow(new RuntimeException("Simulated POST failure"));
 
-    // 5. Verify restTemplate was called
-    Mockito.verify(restTemplate).getForObject(Mockito.anyString(), Mockito.eq(String.class));
+    // Act
+    CompletableFuture<Boolean> futureResult = serviceHelper.postProductListToCache(productListCacheModel, "test-payload");
+
+    // Wait for the async process to complete
+    Boolean result = futureResult.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+    // Assert
+    assertEquals(false, result, "Fallback should return false when exception occurs");
+
+    // Verify restTemplate was called once
+    Mockito.verify(restTemplate, Mockito.times(1))
+            .exchange(Mockito.any(URI.class), Mockito.eq(HttpMethod.POST), Mockito.any(HttpEntity.class), Mockito.eq(Boolean.class));
 }
