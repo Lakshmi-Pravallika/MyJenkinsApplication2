@@ -1,8 +1,59 @@
-@BeforeEach
-void setUp() {
-    bloomreachService.bloomreachAutosuggestHost = "http://mock-bloomreach.com";
-    bloomreachService.bloomreachAccountId = "test-account";
-    bloomreachService.bloomreachDomainKey = "test-domain";
-    bloomreachService.bloomreachCatalogViews = "test-catalog";
-    bloomreachService.fieldList = "pid,title";
-}
+ @Test
+    void populateAutoSuggestedProducts_should_map_skuData_when_present() {
+        // Arrange: suggestion group with one search suggestion with pid "SKU123"
+        SuggestionGroup suggestionGroup = new SuggestionGroup();
+        SearchSuggestion s = new SearchSuggestion();
+        s.setPid("SKU123");
+        s.setGender("Men");
+        s.setTitle("Trail Runner");
+        suggestionGroup.setSearchSuggestions(List.of(s));
+
+        AutoSuggestMSResponse msResponse = new AutoSuggestMSResponse();
+        msResponse.setSuggestion(new QuerySuggestion());
+
+        // Build skuData with all fields that the service maps when skuData != null
+        ProductSkuResultData.ProductSkuData skuData = new ProductSkuResultData.ProductSkuData();
+        skuData.setC_sPrice("99.95");
+        skuData.setC_bPrice("129.95");
+        skuData.setC_image("http://images.example/sku123.jpg");
+        skuData.setC_selectedVariationGroupId("varGroup-1");
+        ProductSkuResultData.ProductSkuData.Master master = new ProductSkuResultData.ProductSkuData.Master();
+        master.setMasterId("MASTER-123");
+        skuData.setMaster(master);
+
+        Map<String, ProductSkuResultData.ProductSkuData> skuMap = new HashMap<>();
+        // Key must exactly match the pid used in the SearchSuggestion
+        skuMap.put("SKU123", skuData);
+
+        // Static-mock ReflecktionsUtils.getSkuMap(...) to return our skuMap
+        try (MockedStatic<ReflecktionsUtils> mocked = Mockito.mockStatic(ReflecktionsUtils.class)) {
+            // Use matchers that will match the actual call in the service:
+            // - first arg: any list containing "SKU123" (we'll accept anyList to be robust)
+            // - second arg: shopApiUrl field from the service (we set it above)
+            // - the rest: any mocks
+            mocked.when(() -> ReflecktionsUtils.getSkuMap(anyList(), eq(bloomreachService.shopApiUrl),
+                    eq(restTemplate), eq(parameterUtil), eq(mapper)))
+                    .thenReturn(skuMap);
+
+            // Act
+            bloomreachService.populateAutoSuggestedProducts(suggestionGroup, msResponse);
+
+            // Assert: msResponse.suggestion.suggestedProducts was populated from skuData
+            assertNotNull(msResponse.getSuggestion().getSuggestedProducts(), "suggestedProducts should not be null");
+            assertEquals(1, msResponse.getSuggestion().getSuggestedProducts().size());
+
+            SuggestedProduct product = msResponse.getSuggestion().getSuggestedProducts().get(0);
+
+            // Verify all mapped fields (these are the fields set in the service when skuData != null)
+            assertEquals("Men Trail Runner", product.getName(), "name should be gender + title");
+            assertEquals("99.95", product.getPrice());
+            assertEquals("129.95", product.getList_price());
+            assertEquals("http://images.example/sku123.jpg", product.getImage_url());
+            assertEquals("varGroup-1", product.getC_selectedVariationGroupId());
+            assertEquals("MASTER-123", product.getC_masterId());
+
+            // Optional: verify the static method was called once
+            mocked.verify(() -> ReflecktionsUtils.getSkuMap(anyList(), eq(bloomreachService.shopApiUrl),
+                    eq(restTemplate), eq(parameterUtil), eq(mapper)), times(1));
+        }
+    }
