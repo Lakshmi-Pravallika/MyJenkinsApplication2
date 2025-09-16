@@ -1,21 +1,19 @@
 @Test
 void testGetProductListFromCache_WhenRuntimeException_ShouldThrowCircuitBreakerException() throws JsonProcessingException {
-    // Enable caching
+    // Arrange - enable caching
     ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
     ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
     ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
 
-    // Mock CircuitBreaker metrics
-    Mockito.when(getCircuitBreaker.getMetrics()).thenReturn(circuitBreakerMetrics);
-    Mockito.when(circuitBreakerMetrics.getFailureRate()).thenReturn(0.0f);
-    Mockito.when(circuitBreakerMetrics.getNumberOfBufferedCalls()).thenReturn(10);
-    Mockito.when(circuitBreakerMetrics.getNumberOfFailedCalls()).thenReturn(2);
-    Mockito.when(circuitBreakerMetrics.getNumberOfSlowCalls()).thenReturn(1);
-    Mockito.when(circuitBreakerMetrics.getNumberOfSuccessfulCalls()).thenReturn(7);
+    // Mock circuit breaker to directly execute supplier
+    Mockito.when(getCircuitBreaker.executeSupplier(Mockito.any()))
+           .thenAnswer(invocation -> {
+               return ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+           });
 
-    // Mock restTemplate to simulate a runtime failure
+    // Mock restTemplate to throw runtime exception
     Mockito.when(restTemplate.getForObject(Mockito.anyString(), Mockito.eq(String.class)))
-            .thenThrow(new RuntimeException("Simulated REST failure"));
+           .thenThrow(new RuntimeException("Simulated REST failure"));
 
     // Act & Assert
     CircuitBreakerException thrown = assertThrows(
@@ -24,6 +22,7 @@ void testGetProductListFromCache_WhenRuntimeException_ShouldThrowCircuitBreakerE
             "Expected CircuitBreakerException to be thrown when RestTemplate fails"
     );
 
+    // Validate exception message and cause
     assertEquals("Main execution failed", thrown.getMessage());
     assertEquals("Simulated REST failure", thrown.getCause().getMessage());
 }
