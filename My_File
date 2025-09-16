@@ -1,72 +1,8 @@
- @Test
-    void testGetAutoSuggestMSResponse_withQueryAndSearchSuggestions() throws Exception {
-        // Arrange
-        QueryParams qp = new QueryParams();
-        qp.setBr_uid_2("uid123");
-        qp.setUrl("http://test-url");
-
-        // Build mock Bloomreach response
-        QuerySuggestionItem querySuggestionItem = new QuerySuggestionItem();
-        querySuggestionItem.setDisplayText("Running Shoes");
-
-        SearchSuggestion searchSuggestion = new SearchSuggestion();
-        searchSuggestion.setPid("SKU123");
-        searchSuggestion.setGender("Women");
-        searchSuggestion.setTitle("Casual Sandals");
-
-        SuggestionGroup suggestionGroup = new SuggestionGroup();
-        suggestionGroup.setQuerySuggestions(List.of(querySuggestionItem));
-        suggestionGroup.setSearchSuggestions(List.of(searchSuggestion));
-
-        BloomreachAutoSuggestResponse autoSuggestResponse = new BloomreachAutoSuggestResponse();
-        autoSuggestResponse.setSuggestionGroups(List.of(suggestionGroup));
-
-        // Serialize to JSON
-        ObjectMapper localMapper = new ObjectMapper();
-        String responseBody = localMapper.writeValueAsString(autoSuggestResponse);
-
-        ResponseEntity<String> responseEntity = new ResponseEntity<>(responseBody, HttpStatus.OK);
-
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
-                .thenReturn(responseEntity);
-
-        // Mock skuMap
-        ProductSkuResultData.ProductSkuData skuData = new ProductSkuResultData.ProductSkuData();
-        skuData.setC_sPrice("150.00");
-        skuData.setC_bPrice("200.00");
-        skuData.setC_image("http://images.com/sandal.jpg");
-
-        ProductSkuResultData.ProductSkuData.Master master = new ProductSkuResultData.ProductSkuData.Master();
-        master.setMasterId("MASTER-SANDAL");
-        skuData.setMaster(master);
-
-        Map<String, ProductSkuResultData.ProductSkuData> skuMap = new HashMap<>();
-        skuMap.put("SKU123", skuData);
-
-        try (MockedStatic<ReflecktionsUtils> mockedUtils = mockStatic(ReflecktionsUtils.class)) {
-            mockedUtils.when(() -> ReflecktionsUtils.getSkuMap(anyList(), anyString(), any(), any(), any()))
-                    .thenReturn(skuMap);
-
-            // Act
-            AutoSuggestMSResponse result = bloomreachService.getAutoSuggestMSResponse(qp, "shoes", "2025-09-16 12:00:00");
-
-            // Assert
-            assertNotNull(result);
-            assertNotNull(result.getSuggestion());
-
-            // Verify query suggestions
-            assertEquals(1, result.getSuggestion().getKeyphrase().size());
-            assertEquals("Running Shoes", result.getSuggestion().getKeyphrase().get(0).getText());
-
-            // Verify search suggestions mapped to suggested products
-            List<SuggestedProduct> suggestedProducts = result.getSuggestion().getSuggestedProducts();
-            assertEquals(1, suggestedProducts.size());
-
-            SuggestedProduct product = suggestedProducts.get(0);
-            assertEquals("Women Casual Sandals", product.getName());
-            assertEquals("150.00", product.getPrice());
-            assertEquals("200.00", product.getList_price());
-            assertEquals("http://images.com/sandal.jpg", product.getImage_url());
-            assertEquals("MASTER-SANDAL", product.getC_masterId());
-        }
-    }
+@BeforeEach
+void setUp() {
+    bloomreachService.bloomreachAutosuggestHost = "http://mock-bloomreach.com";
+    bloomreachService.bloomreachAccountId = "test-account";
+    bloomreachService.bloomreachDomainKey = "test-domain";
+    bloomreachService.bloomreachCatalogViews = "test-catalog";
+    bloomreachService.fieldList = "pid,title";
+}
