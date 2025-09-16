@@ -1,6 +1,6 @@
-java.lang.NullPointerException: Cannot invoke "com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceHelper.getProductListFromCache(com.skechers.loyalty.reflecktions.model.ProductListCacheModel)" because "this.loyaltyReflecktionsServiceHelper" is null
-	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl.getProducts(LoyaltyReflecktionsServiceImpl.java:97)
-	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImplTest.testGetProducts_SuccessfulFlow_ElseBlock(LoyaltyReflecktionsServiceImplTest.java:147)
+java.lang.NullPointerException: Cannot invoke "com.skechers.loyalty.reflecktions.service.BloomreachService.getBloomreachSearchResults(com.skechers.loyalty.reflecktions.data.request.QueryParams, String, java.util.Map, java.util.Optional)" because "this.bloomreachService" is null
+	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl.getProducts(LoyaltyReflecktionsServiceImpl.java:101)
+	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImplTest.testGetProducts_SuccessfulFlow_ElseBlock(LoyaltyReflecktionsServiceImplTest.java:156)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
 	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
