@@ -1,23 +1,7 @@
-<!-- JUnit 5 -->
-<dependency>
-    <groupId>org.junit.jupiter</groupId>
-    <artifactId>junit-jupiter</artifactId>
-    <version>5.9.2</version>
-    <scope>test</scope>
-</dependency>
-
-<!-- Mockito -->
-<dependency>
-    <groupId>org.mockito</groupId>
-    <artifactId>mockito-core</artifactId>
-    <version>5.5.0</version>
-    <scope>test</scope>
-</dependency>
-
-<!-- Mockito + JUnit 5 Integration -->
-<dependency>
-    <groupId>org.mockito</groupId>
-    <artifactId>mockito-junit-jupiter</artifactId>
-    <version>5.5.0</version>
-    <scope>test</scope>
-</dependency>
+testImplementation 'org.springframework.boot:spring-boot-starter-test' // includes JUnit Jupiter
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
+	testImplementation 'org.mockito:mockito-core:5.5.0'
+	testImplementation 'org.mockito:mockito-junit-jupiter:5.5.0'
+	testImplementation 'org.mockito:mockito-inline:5.2.0' // for mocking static methods
+	testImplementation 'org.instancio:instancio-junit:3.2.0'
+	testImplementation 'com.squareup.okhttp3:mockwebserver:3.8.1'
