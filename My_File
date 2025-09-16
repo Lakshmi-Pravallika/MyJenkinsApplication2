@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.*;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Optional;
@@ -38,15 +39,24 @@ class LoyaltyReflecktionsServiceHelperTest {
     @Mock
     RestTemplate restTemplate;
 
-    @InjectMocks
     LoyaltyReflecktionsServiceHelper serviceHelper;
 
     ProductListCacheModel cacheModel;
 
     @BeforeEach
     void setUp() {
-        serviceHelper.cacheHost = "http://mock-cache-host";
-        serviceHelper.environment = "dev";
+        // Create service using the actual constructor
+        serviceHelper = new LoyaltyReflecktionsServiceHelper(
+                getCircuitBreaker,
+                postCircuitBreaker,
+                ssmClient,
+                parameterUtil,
+                restTemplate
+        );
+
+        // Set private fields using ReflectionTestUtils
+        ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
+        ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
 
         cacheModel = new ProductListCacheModel();
         cacheModel.setCategory("shoes");
@@ -61,69 +71,101 @@ class LoyaltyReflecktionsServiceHelperTest {
 
     /**
      * Covers the GET path where restTemplate.exchange throws Exception
-     * -> triggers CircuitBreakerException
+     * -> triggers CircuitBreakerException inside supplier
      */
     @Test
     void testGetProductListFromCache_ThrowsCircuitBreakerException() {
-        serviceHelper.isCacheEnabled = true;
+        // Enable cache
+        ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
 
-        // Mock restTemplate to throw an exception inside the supplier
+        // Mock restTemplate to throw exception
         when(restTemplate.exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
                 .thenThrow(new RuntimeException("Simulated GET failure"));
 
-        // Mock parameterUtil
         when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("mock-api-key");
 
-        CircuitBreaker mockCb = mock(CircuitBreaker.class);
+        // Make CircuitBreaker decorator return our supplier directly
         when(getCircuitBreaker.decorateCheckedSupplier(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThrows(CircuitBreakerException.class, () -> {
             serviceHelper.getProductListFromCache(cacheModel);
         });
 
-        verify(restTemplate, times(1)).exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class));
+        verify(restTemplate, times(1))
+                .exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class));
     }
 
     /**
-     * Covers the POST path where restTemplate.exchange throws Exception
+     * Covers POST where restTemplate.exchange throws Exception
      * -> triggers CircuitBreakerException
      */
     @Test
     void testPostProductListToCache_ThrowsCircuitBreakerException() throws JsonProcessingException {
-        serviceHelper.isCacheEnabled = true;
+        // Enable cache
+        ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
 
-        // Mock restTemplate to throw an exception inside the supplier
         when(restTemplate.exchange(any(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Boolean.class)))
                 .thenThrow(new RuntimeException("Simulated POST failure"));
 
-        // Mock parameterUtil
         when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("mock-api-key");
 
-        CircuitBreaker mockCb = mock(CircuitBreaker.class);
+        // Make CircuitBreaker decorator return our supplier directly
         when(postCircuitBreaker.decorateCheckedSupplier(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompletableFuture<Boolean> future = serviceHelper.postProductListToCache(cacheModel, "mock-payload");
 
-        // Since exception is thrown, fallback should result in false
+        // Since exception occurs, fallback returns false
         Boolean result = future.join();
         assertFalse(result);
 
-        verify(restTemplate, times(1)).exchange(any(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Boolean.class));
+        verify(restTemplate, times(1))
+                .exchange(any(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Boolean.class));
     }
 
     /**
-     * Covers resetCacheFlag using static mocking of ReflecktionsUtils
+     * Covers resetCacheFlag where static method ReflecktionsUtils.getParameterValue is mocked
      */
     @Test
     void testResetCacheFlag() {
         try (MockedStatic<ReflecktionsUtils> mockedStatic = Mockito.mockStatic(ReflecktionsUtils.class)) {
-            mockedStatic.when(() -> ReflecktionsUtils.getParameterValue(eq(ssmClient),
-                    eq("/config/loyalty_dev/is_cache_enabled"))).thenReturn("true");
+            mockedStatic.when(() ->
+                    ReflecktionsUtils.getParameterValue(eq(ssmClient),
+                            eq("/config/loyalty_dev/is_cache_enabled")))
+                    .thenReturn("true");
 
             serviceHelper.resetCacheFlag();
 
-            // Since value is "true", isCacheEnabled should become true
-            assertTrue(serviceHelper.isCacheEnabled);
+            // Verify that isCacheEnabled is updated
+            boolean actualValue = (boolean) ReflectionTestUtils.getField(serviceHelper, "isCacheEnabled");
+            assertTrue(actualValue);
         }
+    }
+
+    /**
+     * Covers the scenario where isCacheEnabled is false,
+     * so getProductListFromCache returns false without calling RestTemplate.
+     */
+    @Test
+    void testGetProductListFromCache_WhenCacheDisabled() throws JsonProcessingException {
+        ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", false);
+
+        Object result = serviceHelper.getProductListFromCache(cacheModel);
+
+        assertFalse((Boolean) result);
+        verifyNoInteractions(restTemplate);
+    }
+
+    /**
+     * Covers the scenario where isCacheEnabled is false,
+     * so postProductListToCache doesn't call RestTemplate and immediately returns false.
+     */
+    @Test
+    void testPostProductListToCache_WhenCacheDisabled() throws JsonProcessingException {
+        ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", false);
+
+        CompletableFuture<Boolean> future = serviceHelper.postProductListToCache(cacheModel, "mock-payload");
+
+        assertFalse(future.join());
+        verifyNoInteractions(restTemplate);
     }
 }
