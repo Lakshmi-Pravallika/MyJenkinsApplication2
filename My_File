@@ -1,50 +1,29 @@
 @Test
-void testGetProducts_SuccessfulFlow_ElseBlock() throws Exception {
-    // Arrange
-    ProductListCacheModel cacheModel = new ProductListCacheModel();
-    cacheModel.setCategory("shoes");
+void testGetProductListFromCache_WhenRuntimeException_ShouldThrowCircuitBreakerException() throws JsonProcessingException {
+    // Enable caching
+    ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
+    ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
+    ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
 
-    Map<String, String> filterMap = new HashMap<>();
-    QueryParams qp = new QueryParams();
-    qp.setSearchType("CATEGORY");
+    // Mock CircuitBreaker metrics
+    Mockito.when(getCircuitBreaker.getMetrics()).thenReturn(circuitBreakerMetrics);
+    Mockito.when(circuitBreakerMetrics.getFailureRate()).thenReturn(0.0f);
+    Mockito.when(circuitBreakerMetrics.getNumberOfBufferedCalls()).thenReturn(10);
+    Mockito.when(circuitBreakerMetrics.getNumberOfFailedCalls()).thenReturn(2);
+    Mockito.when(circuitBreakerMetrics.getNumberOfSlowCalls()).thenReturn(1);
+    Mockito.when(circuitBreakerMetrics.getNumberOfSuccessfulCalls()).thenReturn(7);
 
-    Map<String, String> sort = new HashMap<>();
+    // Mock restTemplate to simulate a runtime failure
+    Mockito.when(restTemplate.getForObject(Mockito.anyString(), Mockito.eq(String.class)))
+            .thenThrow(new RuntimeException("Simulated REST failure"));
 
-    // Mock loyaltyReflecktionsServiceHelper to avoid NPE
-    when(loyaltyReflecktionsServiceHelper.getProductListFromCache(any(ProductListCacheModel.class)))
-            .thenReturn(null);
-
-    // ✅ Mock bloomreachService to return null for bloomreachResponse
-    when(bloomreachService.getBloomreachSearchResults(any(QueryParams.class), any(), anyMap(), anyMap()))
-            .thenReturn(null);
-
-    // Mock mapper for safe JSON conversion
-    when(mapper.writeValueAsString(any())).thenReturn("{\"status\":\"success\"}");
-
-    // Act
-    ResponseEntity<String> response = loyaltyService.getProducts(
-            "123",
-            servletRequest,
-            filterMap,
-            qp,
-            sort,
-            null,
-            cacheModel
+    // Act & Assert
+    CircuitBreakerException thrown = assertThrows(
+            CircuitBreakerException.class,
+            () -> serviceHelper.getProductListFromCache(productListCacheModel),
+            "Expected CircuitBreakerException to be thrown when RestTemplate fails"
     );
 
-    // Assert
-    assertNotNull(response, "ResponseEntity should not be null");
-
-    // Since bloomreachResponse is mocked to be null,
-    // we expect NO_CONTENT or empty body depending on your implementation
-    assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode(),
-            "Expected HTTP status 204 when bloomreachResponse is null");
-    assertNull(response.getBody(), "Expected response body to be null when bloomreachResponse is null");
-
-    // Verify bloomreachService interaction
-    verify(bloomreachService, times(1))
-            .getBloomreachSearchResults(any(QueryParams.class), any(), anyMap(), anyMap());
-
-    // Verify postToCache is NOT called when bloomreachResponse is null
-    verify(loyaltyReflecktionsServiceHelper, never()).postToCache(any(), any(), anyString());
+    assertEquals("Main execution failed", thrown.getMessage());
+    assertEquals("Simulated REST failure", thrown.getCause().getMessage());
 }
