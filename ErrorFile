@@ -1,21 +1,6 @@
-@Builder
-@Data
-public class ProductListCacheModel {
-
-	private Optional<String> locale;
-	private Optional<String> page;
-	private Optional<String> limit;
-	private Optional<String> sort;
-	private Optional<String> filter;
-	private Optional<String> store_id;
-	private Optional<String> searchType;
-	private String category;
-}
-
-java.lang.NullPointerException: Cannot invoke "java.util.Optional.ifPresent(java.util.function.Consumer)" because the return value of "com.skechers.loyalty.reflecktions.model.ProductListCacheModel.getLimit()" is null
-	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl.processSkus(LoyaltyReflecktionsServiceImpl.java:174)
-	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl.processSearchForRefk(LoyaltyReflecktionsServiceImpl.java:142)
-	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImplTest.testProcessSearchForRefk_Success(LoyaltyReflecktionsServiceImplTest.java:119)
+java.lang.NullPointerException: Cannot invoke "com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceHelper.getProductListFromCache(com.skechers.loyalty.reflecktions.model.ProductListCacheModel)" because "this.loyaltyReflecktionsServiceHelper" is null
+	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImpl.getProducts(LoyaltyReflecktionsServiceImpl.java:97)
+	at com.skechers.loyalty.reflecktions.service.LoyaltyReflecktionsServiceImplTest.testGetProducts_SuccessfulFlow_ElseBlock(LoyaltyReflecktionsServiceImplTest.java:147)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
 	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
