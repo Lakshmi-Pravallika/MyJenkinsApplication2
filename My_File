@@ -1,49 +1,204 @@
-@Test
-void testGetProductListFromCache_WhenRestTemplateFails_ShouldTriggerFallback() {
-    // Enable the cache
-    ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
+package com.skechers.loyalty.reflecktions.service;
 
-    // Set private fields
-    ReflectionTestUtils.setField(serviceHelper, "cacheHost", "http://mock-cache-host");
-    ReflectionTestUtils.setField(serviceHelper, "environment", "dev");
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skechers.loyalty.reflecktions.constants.LoyaltyReflecktionsConstants;
+import com.skechers.loyalty.reflecktions.data.request.QueryParams;
+import com.skechers.loyalty.reflecktions.data.response.*;
+import com.skechers.loyalty.reflecktions.exception.CustomException;
+import com.skechers.loyalty.reflecktions.model.ProductListCacheModel;
+import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.*;
+import org.springframework.web.client.RestTemplate;
 
-    // Mock the API key
-    Mockito.when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("dummy-key");
+import java.io.IOException;
+import java.util.*;
 
-    // Make restTemplate throw
-    Mockito.when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
-           .thenThrow(new RuntimeException("Simulated failure"));
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-    // Call method
-    Object result = serviceHelper.getProductListFromCache(cacheModel);
+@Tag("unit")
+@ExtendWith(MockitoExtension.class)
+class LoyaltyReflecktionsServiceImplTest {
 
-    // ✅ Even though CircuitBreakerException is thrown internally,
-    //    the outer catch returns false to the caller
-    assertEquals(false, result);
+    @Mock
+    RestTemplate restTemplate;
 
-    // Verify restTemplate was called
-    Mockito.verify(restTemplate, times(1))
-           .exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class));
-}
+    @Mock
+    HttpServletRequest servletRequest;
 
+    @Mock
+    ObjectMapper mapper;
 
-@Test
-void testCircuitBreakerLambdaThrowsException() throws Throwable {
-    // Enable cache
-    ReflectionTestUtils.setField(serviceHelper, "isCacheEnabled", true);
+    @InjectMocks
+    LoyaltyReflecktionsServiceImpl loyaltyService;
 
-    // Force API key
-    Mockito.when(parameterUtil.getEnvironmentParameter("cache_api_key")).thenReturn("dummy-key");
+    private ProductListCacheModel productListCacheModel;
+    private Map<String, String> filterMap;
+    private SearchCategoryResponseData responseData;
 
-    // Force restTemplate to throw
-    Mockito.when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(Object.class)))
-           .thenThrow(new RuntimeException("Simulated failure"));
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
 
-    // Build the supplier manually like inside serviceHelper
-    CheckedFunction0<Object> supplier = CircuitBreaker.decorateCheckedSupplier(getCircuitBreaker, () -> {
-        throw new CircuitBreakerException("Main execution failed", new RuntimeException("Simulated failure"));
-    });
+        productListCacheModel = ProductListCacheModel.builder()
+                .limit(Optional.of("10"))
+                .build();
 
-    // ✅ This will now actually throw CircuitBreakerException
-    assertThrows(CircuitBreakerException.class, supplier::apply);
+        filterMap = new HashMap<>();
+
+        // ----------- Build SearchCategoryResponseData -------------
+        responseData = new SearchCategoryResponseData();
+        responseData.setTotalItem(2);
+
+        // Mock product values
+        ValueItem item1 = new ValueItem();
+        item1.setId("p1");
+
+        ValueItem item2 = new ValueItem();
+        item2.setId("p2");
+
+        Product productData = new Product();
+        productData.setValue(Arrays.asList(item1, item2));
+
+        Content contentData = new Content();
+        contentData.setProduct(productData);
+        responseData.setContent(contentData);
+
+        // ----------- Build Facets -------------
+        CategoryProductFacetValue facetValue = new CategoryProductFacetValue();
+        facetValue.setLabel("Red");
+        facetValue.setValue("red");
+
+        CategoryProductFacetData colorFacet = new CategoryProductFacetData();
+        colorFacet.setValue(new ArrayList<>(Collections.singletonList(facetValue)));
+
+        CategoryProductFacetData sizeFacet = new CategoryProductFacetData();
+        sizeFacet.setValue(new ArrayList<>());
+
+        Map<String, CategoryProductFacetData> facetMap = new HashMap<>();
+        facetMap.put("colors", colorFacet);
+        facetMap.put("sizes", sizeFacet);
+
+        responseData.setFacet(facetMap);
+    }
+
+    // ---------------- Existing Test ----------------
+    @Test
+    void testProcessSearchForRefk_Success() throws IOException {
+        String expectedJson = "{\"status\":\"success\"}";
+        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn(expectedJson);
+
+        String result = loyaltyService.processSearchForRefk(filterMap, productListCacheModel, responseData, null);
+
+        assertNotNull(result);
+        assertEquals(expectedJson, result);
+    }
+
+    // ---------------- New Tests Added Below ----------------
+
+    @Test
+    void testGetProducts_SuccessfulFlow_ElseBlock() throws Exception {
+        QueryParams queryParams = new QueryParams();
+        queryParams.setSearchType("NORMAL");
+
+        // Mock restTemplate to return valid SearchCategoryResponseData
+        ResponseEntity<SearchCategoryResponseData> mockResponseEntity =
+                new ResponseEntity<>(responseData, HttpStatus.OK);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class)))
+                .thenReturn(mockResponseEntity);
+
+        when(mapper.writeValueAsString(any(SearchCategoryResponseData.class))).thenReturn("{\"facet\":\"value\"}");
+
+        // Act
+        ResponseEntity<String> result = loyaltyService.getProducts(
+                "searchKey",
+                servletRequest,
+                filterMap,
+                queryParams,
+                Optional.empty(),
+                productListCacheModel,
+                Optional.empty()
+        );
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertTrue(result.getBody().contains("facet"));
+
+        // Verify calls
+        verify(restTemplate, times(1))
+                .exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class));
+    }
+
+    @Test
+    void testGetProducts_CustomExceptionThrown() {
+        QueryParams queryParams = new QueryParams();
+        queryParams.setSearchType("NORMAL");
+
+        // Return null body to trigger CustomException
+        ResponseEntity<SearchCategoryResponseData> nullResponse = new ResponseEntity<>(null, HttpStatus.OK);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class)))
+                .thenReturn(nullResponse);
+
+        assertThrows(CustomException.class, () -> loyaltyService.getProducts(
+                "searchKey",
+                servletRequest,
+                filterMap,
+                queryParams,
+                Optional.empty(),
+                productListCacheModel,
+                Optional.empty()
+        ));
+    }
+
+    @Test
+    void testGetProducts_SuggestionFlow() throws Exception {
+        QueryParams queryParams = new QueryParams();
+        queryParams.setSearchType(LoyaltyReflecktionsConstants.SUGGESTION);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("suggestionResponse", HttpStatus.OK));
+
+        // Act
+        ResponseEntity<String> result = loyaltyService.getProducts(
+                "searchKey",
+                servletRequest,
+                filterMap,
+                queryParams,
+                Optional.empty(),
+                productListCacheModel,
+                Optional.empty()
+        );
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertEquals("suggestionResponse", result.getBody());
+    }
+
+    @Test
+    void testGetProducts_ExceptionInMainFlow_ThrowsCustomException() {
+        QueryParams queryParams = new QueryParams();
+        queryParams.setSearchType("NORMAL");
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class)))
+                .thenThrow(new RuntimeException("Service failure"));
+
+        assertThrows(CustomException.class, () -> loyaltyService.getProducts(
+                "searchKey",
+                servletRequest,
+                filterMap,
+                queryParams,
+                Optional.empty(),
+                productListCacheModel,
+                Optional.empty()
+        ));
+    }
 }
