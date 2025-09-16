@@ -1,1 +1,48 @@
-My file
+@Test
+    void testPopulateAutoSuggestedProducts() {
+        // Arrange
+        SuggestionGroup suggestionGroup = new SuggestionGroup();
+        SearchSuggestion suggestion1 = new SearchSuggestion();
+        suggestion1.setPid("12345");
+        suggestion1.setGender("Men");
+        suggestion1.setTitle("Running Shoes");
+
+        suggestionGroup.setSearchSuggestions(List.of(suggestion1));
+
+        AutoSuggestMSResponse msResponse = new AutoSuggestMSResponse();
+        msResponse.setSuggestion(new QuerySuggestion());
+
+        ProductSkuResultData.ProductSkuData skuData = new ProductSkuResultData.ProductSkuData();
+        skuData.setC_sPrice("99.99");
+        skuData.setC_bPrice("129.99");
+        skuData.setC_image("http://image-url.com/img.jpg");
+        skuData.setC_selectedVariationGroupId("varGroup123");
+
+        ProductSkuResultData.ProductSkuData.Master master = new ProductSkuResultData.ProductSkuData.Master();
+        master.setMasterId("master123");
+        skuData.setMaster(master);
+
+        Map<String, ProductSkuResultData.ProductSkuData> skuMap = new HashMap<>();
+        skuMap.put("12345", skuData);
+
+        try (MockedStatic<ReflecktionsUtils> mockedUtils = Mockito.mockStatic(ReflecktionsUtils.class)) {
+            mockedUtils.when(() -> ReflecktionsUtils.getSkuMap(
+                    anyList(), anyString(), any(RestTemplate.class), any(ParameterUtil.class), any(ObjectMapper.class)))
+                    .thenReturn(skuMap);
+
+            // Act
+            bloomreachService.populateAutoSuggestedProducts(suggestionGroup, msResponse);
+
+            // Assert
+            List<SuggestedProduct> products = msResponse.getSuggestion().getSuggestedProducts();
+            assertNotNull(products);
+            assertEquals(1, products.size());
+
+            SuggestedProduct product = products.get(0);
+            assertEquals("Men Running Shoes", product.getName());
+            assertEquals("99.99", product.getPrice());
+            assertEquals("129.99", product.getList_price());
+            assertEquals("http://image-url.com/img.jpg", product.getImage_url());
+            assertEquals("varGroup123", product.getC_selectedVariationGroupId());
+            assertEquals("master123", product.getC_masterId());
+        }
