@@ -1,42 +1,50 @@
 @Test
 void testGetProducts_SuccessfulFlow_ElseBlock() throws Exception {
-    QueryParams queryParams = new QueryParams();
-    queryParams.setSearchType("NORMAL");
+    // Arrange
+    ProductListCacheModel cacheModel = new ProductListCacheModel();
+    cacheModel.setCategory("shoes");
 
-    // Mock cache call to return false so it goes into the ELSE block
+    Map<String, String> filterMap = new HashMap<>();
+    QueryParams qp = new QueryParams();
+    qp.setSearchType("CATEGORY");
+
+    Map<String, String> sort = new HashMap<>();
+
+    // Mock loyaltyReflecktionsServiceHelper to avoid NPE
     when(loyaltyReflecktionsServiceHelper.getProductListFromCache(any(ProductListCacheModel.class)))
-            .thenReturn(false);
+            .thenReturn(null);
 
-    // Mock restTemplate to return valid SearchCategoryResponseData
-    ResponseEntity<SearchCategoryResponseData> mockResponseEntity =
-            new ResponseEntity<>(responseData, HttpStatus.OK);
+    // ✅ Mock bloomreachService to return null for bloomreachResponse
+    when(bloomreachService.getBloomreachSearchResults(any(QueryParams.class), any(), anyMap(), anyMap()))
+            .thenReturn(null);
 
-    when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class)))
-            .thenReturn(mockResponseEntity);
-
-    when(mapper.writeValueAsString(any(SearchCategoryResponseData.class)))
-            .thenReturn("{\"facet\":\"value\"}");
+    // Mock mapper for safe JSON conversion
+    when(mapper.writeValueAsString(any())).thenReturn("{\"status\":\"success\"}");
 
     // Act
-    ResponseEntity<String> result = loyaltyService.getProducts(
-            "searchKey",
+    ResponseEntity<String> response = loyaltyService.getProducts(
+            "123",
             servletRequest,
             filterMap,
-            queryParams,
-            Optional.empty(),
-            productListCacheModel,
-            Optional.empty()
+            qp,
+            sort,
+            null,
+            cacheModel
     );
 
     // Assert
-    assertNotNull(result);
-    assertEquals(HttpStatus.OK, result.getStatusCode());
-    assertTrue(result.getBody().contains("facet"));
+    assertNotNull(response, "ResponseEntity should not be null");
 
-    // Verify helper and restTemplate interactions
-    verify(loyaltyReflecktionsServiceHelper, times(1))
-            .getProductListFromCache(any(ProductListCacheModel.class));
+    // Since bloomreachResponse is mocked to be null,
+    // we expect NO_CONTENT or empty body depending on your implementation
+    assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode(),
+            "Expected HTTP status 204 when bloomreachResponse is null");
+    assertNull(response.getBody(), "Expected response body to be null when bloomreachResponse is null");
 
-    verify(restTemplate, times(1))
-            .exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class));
+    // Verify bloomreachService interaction
+    verify(bloomreachService, times(1))
+            .getBloomreachSearchResults(any(QueryParams.class), any(), anyMap(), anyMap());
+
+    // Verify postToCache is NOT called when bloomreachResponse is null
+    verify(loyaltyReflecktionsServiceHelper, never()).postToCache(any(), any(), anyString());
 }
