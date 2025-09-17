@@ -1,42 +1,66 @@
- @Test
-    void testPopulatePriceFacet_withRegularValues() {
-        // Arrange
-        Facet facet = new Facet();
-        facet.setName("price");
+@Test
+void testGetProducts_ProcessSearchFlow_Success() throws Exception {
+    // Arrange
+    QueryParams qp = new QueryParams();
+    qp.setSearchType("CATEGORY"); // not equal to "SUGGESTION" so it will go to ELSE branch
 
-        FacetValue fv1 = new FacetValue();
-        fv1.setStart("10");
-        fv1.setEnd("50");
-        fv1.setCount(5L);
+    // Step 1: Mock cache retrieval to return a non-String so that it proceeds further
+    when(loyaltyReflecktionsServiceHelper.getProductListFromCache(productListCacheModel))
+            .thenReturn(false);
 
-        FacetValue fv2 = new FacetValue();
-        fv2.setStart("51");
-        fv2.setEnd("100");
-        fv2.setCount(3L);
+    // Step 2: Mock Bloomreach response to return null
+    when(bloomreachService.getBloomreachSearchResults(any(), anyString(), any(), any()))
+            .thenReturn(null);
 
-        facet.setValue(Arrays.asList(fv1, fv2));
+    // Step 3: Mock ReflecktionsUtils static method calls
+    try (var mockedStatic = Mockito.mockStatic(ReflecktionsUtils.class)) {
+        mockedStatic.when(() -> ReflecktionsUtils.convertURLParamToMap(any(Optional.class), anyString()))
+                .thenReturn(Collections.emptyMap());
+        mockedStatic.when(() -> ReflecktionsUtils.isAppRedirectLink(anyString()))
+                .thenReturn(false);
 
-        CategoryProductFacetData facetData = new CategoryProductFacetData();
-        Map<String, CategoryProductFacetData> facetMap = new HashMap<>();
+        // Step 4: Mock RestTemplate.exchange for SearchCategoryResponseData
+        ResponseEntity<SearchCategoryResponseData> mockResponseEntity = new ResponseEntity<>(responseData, HttpStatus.OK);
+        when(restTemplate.exchange(
+                anyString(),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(SearchCategoryResponseData.class)))
+                .thenReturn(mockResponseEntity);
+
+        // Step 5: Mock processSearchForRefk to return final JSON string
+        String expectedJson = "{\"status\":\"success\"}";
+        Mockito.doReturn(expectedJson)
+               .when(loyaltyService)
+               .processSearchForRefk(filterMap, productListCacheModel, responseData, null);
 
         // Act
-        ReflectionTestUtils.invokeMethod(
-                bloomreachService, // instance
-                "populatePriceFacet", // private method name
-                facet, facetData, facetMap
+        ResponseEntity<String> result = loyaltyService.getProducts(
+                "dataValue",
+                servletRequest,
+                filterMap,
+                qp,
+                Optional.of("store123"),
+                productListCacheModel,
+                Optional.of("sortValue")
         );
 
         // Assert
-        assertNotNull(facetMap.get("price"));
-        List<CategoryProductFacetValue> values = facetMap.get("price").getValue();
+        assertNotNull(result);
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertEquals(expectedJson, result.getBody());
 
-        assertEquals(2, values.size());
-        
-        // Validate encoding and label
-        String decodedValue = new String(Base64.getDecoder().decode(values.get(0).getValue()));
-        assertEquals("[10 TO 50]", decodedValue);
+        // Verify calls
+        Mockito.verify(loyaltyReflecktionsServiceHelper, Mockito.times(1))
+               .getProductListFromCache(productListCacheModel);
 
-        assertEquals("$10-$50", values.get(0).getLabel());
-        assertEquals("$51-$100", values.get(1).getLabel());
+        Mockito.verify(bloomreachService, Mockito.times(1))
+               .getBloomreachSearchResults(any(), anyString(), any(), any());
+
+        Mockito.verify(restTemplate, Mockito.times(1))
+               .exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(SearchCategoryResponseData.class));
+
+        Mockito.verify(loyaltyService, Mockito.times(1))
+               .processSearchForRefk(filterMap, productListCacheModel, responseData, null);
     }
-
+}
